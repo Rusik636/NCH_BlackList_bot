@@ -52,10 +52,32 @@ class BotConfig:
 
 
 @dataclass
+class SecurityConfig:
+    """Конфигурация безопасности для хеширования персональных данных."""
+    hash_pepper: str
+    
+    @classmethod
+    def from_env(cls) -> "SecurityConfig":
+        """Создает конфигурацию безопасности из переменных окружения."""
+        hash_pepper = os.getenv("HASH_PEPPER")
+        if not hash_pepper:
+            raise ValueError(
+                "HASH_PEPPER не установлен в переменных окружения. "
+                "Сгенерируйте случайную строку минимум 32 символа."
+            )
+        
+        if len(hash_pepper) < 32:
+            raise ValueError("HASH_PEPPER должен быть минимум 32 символа")
+        
+        return cls(hash_pepper=hash_pepper)
+
+
+@dataclass
 class Config:
     """Основная конфигурация приложения."""
     bot: BotConfig
     database: DatabaseConfig
+    security: SecurityConfig
     debug: bool = False
     
     @classmethod
@@ -71,9 +93,11 @@ class Config:
             database=os.getenv("DB_NAME", "lict_rent"),
         )
         
+        security = SecurityConfig.from_env()
+        
         debug = os.getenv("DEBUG", "False").lower() == "true"
         
-        return cls(bot=bot, database=database, debug=debug)
+        return cls(bot=bot, database=database, security=security, debug=debug)
 
 
 # Глобальный экземпляр конфигурации

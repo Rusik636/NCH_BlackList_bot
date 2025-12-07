@@ -6,6 +6,7 @@ from telebot.types import ReplyKeyboardMarkup, KeyboardButton
 
 # Константы текстов кнопок
 BTN_ADD_TO_BLACKLIST = "Добавить в ЧС"
+BTN_CHECK_USER = "Проверить"
 
 
 def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
@@ -17,8 +18,11 @@ def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
     """
     keyboard = ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     
-    # Первая кнопка - Добавить в ЧС
-    keyboard.add(KeyboardButton(BTN_ADD_TO_BLACKLIST))
+    # Первый ряд - две кнопки
+    keyboard.add(
+        KeyboardButton(BTN_ADD_TO_BLACKLIST),
+        KeyboardButton(BTN_CHECK_USER),
+    )
     
     return keyboard
 
