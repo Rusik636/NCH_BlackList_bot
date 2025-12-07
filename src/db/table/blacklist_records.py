@@ -14,6 +14,7 @@ TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS blacklist_records (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     person_id UUID NOT NULL REFERENCES blacklist_persons(id) ON DELETE CASCADE,
+    organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     added_by_admin_id UUID NOT NULL REFERENCES admins(id) ON DELETE RESTRICT,
     reason TEXT NOT NULL,
     comment TEXT,
@@ -36,6 +37,11 @@ CREATE INDEX IF NOT EXISTS idx_blacklist_records_status ON blacklist_records(sta
 # Индекс для поиска по админу, добавившему запись
 ADMIN_ID_INDEX_SQL = """
 CREATE INDEX IF NOT EXISTS idx_blacklist_records_admin_id ON blacklist_records(added_by_admin_id);
+"""
+
+# Индекс для поиска по организации
+ORG_ID_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_blacklist_records_org_id ON blacklist_records(organization_id);
 """
 
 # Удаление триггера
@@ -75,6 +81,9 @@ async def create_table(db_manager: DatabaseManager) -> None:
         
         await db_manager.execute(ADMIN_ID_INDEX_SQL)
         logger.debug("Индекс idx_blacklist_records_admin_id создан")
+        
+        await db_manager.execute(ORG_ID_INDEX_SQL)
+        logger.debug("Индекс idx_blacklist_records_org_id создан")
         
         # Удаляем триггер, если существует (для идемпотентности)
         await db_manager.execute(DROP_TRIGGER_SQL)
