@@ -13,6 +13,7 @@ from telebot import asyncio_helper
 from src.config import get_config
 from src.db.connection import DatabaseManager
 from src.db.table import initialize_tables
+from src.bot.application.context import BotContext
 from src.bot.application.register_handlers import register_handlers
 
 # Логирование настраивается автоматически при загрузке конфигурации
@@ -27,6 +28,7 @@ class BotApplication:
         self.config = get_config()
         self.bot: Optional[AsyncTeleBot] = None
         self.db_manager: Optional[DatabaseManager] = None
+        self.context: Optional[BotContext] = None
     
     async def initialize_database(self) -> None:
         """Инициализация подключения к базе данных."""
@@ -49,8 +51,13 @@ class BotApplication:
             logger.info("Инициализация Telegram бота...")
             self.bot = AsyncTeleBot(self.config.bot.token)
             
+            # Создаем контекст приложения с зависимостями
+            if not self.db_manager:
+                raise RuntimeError("База данных не инициализирована")
+            self.context = BotContext(self.db_manager)
+            
             # Регистрация обработчиков
-            register_handlers(self.bot)
+            register_handlers(self.bot, self.context)
             
             logger.info("Бот инициализирован")
         except Exception as e:
