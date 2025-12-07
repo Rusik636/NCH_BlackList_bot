@@ -1,0 +1,12 @@
+# Telegram Bot
+pyTelegramBotAPI
+
+# Database
+asyncpg
+
+# Environment variables
+python-dotenv
+
+# Logging and utilities
+python-dateutil
+
