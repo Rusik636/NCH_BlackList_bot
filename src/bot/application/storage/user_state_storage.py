@@ -25,6 +25,7 @@ class BlacklistCollectionData:
         department_code: Код подразделения
         phone: Номер телефона (опционально)
         reason: Причина добавления в ЧС
+        comment: Дополнительный комментарий (опционально)
         started_at: Время начала сбора данных
     """
     fio: Optional[str] = None
@@ -33,6 +34,7 @@ class BlacklistCollectionData:
     department_code: Optional[str] = None
     phone: Optional[str] = None
     reason: Optional[str] = None
+    comment: Optional[str] = None
     started_at: datetime = field(default_factory=datetime.now)
 
 

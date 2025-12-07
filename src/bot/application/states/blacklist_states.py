@@ -25,6 +25,9 @@ class BlacklistAddState(Enum):
     # Ожидание ввода причины добавления в ЧС
     WAITING_REASON = auto()
     
+    # Ожидание ввода комментария (опционально)
+    WAITING_COMMENT = auto()
+    
     # Подтверждение данных
     CONFIRMATION = auto()
 

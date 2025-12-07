@@ -23,6 +23,7 @@ from src.bot.application.handlers.blacklist.keyboards import (
     CALLBACK_CONFIRM_ADD,
     CALLBACK_EDIT,
     CALLBACK_CANCEL,
+    CALLBACK_REASON_PREFIX,
 )
 
 logger = logging.getLogger(__name__)
@@ -68,9 +69,12 @@ def register_handlers(bot: AsyncTeleBot, context: BotContext) -> None:
         pass_bot=True
     )(cancel_collection_handler)
     
-    # Callback-обработчик для инлайн-кнопок подтверждения
+    # Callback-обработчик для инлайн-кнопок (подтверждение и выбор причины)
     @bot.callback_query_handler(
-        func=lambda call: call.data in [CALLBACK_CONFIRM_ADD, CALLBACK_EDIT, CALLBACK_CANCEL]
+        func=lambda call: (
+            call.data in [CALLBACK_CONFIRM_ADD, CALLBACK_EDIT, CALLBACK_CANCEL]
+            or call.data.startswith(CALLBACK_REASON_PREFIX)
+        )
     )
     async def _blacklist_callback_wrapper(call):
         await blacklist_callback_handler(call, bot)

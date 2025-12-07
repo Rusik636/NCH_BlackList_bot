@@ -12,13 +12,16 @@ from src.bot.application.storage import user_state_storage, BlacklistCollectionD
 from src.bot.application.keyboard import get_main_menu_keyboard
 from src.bot.application.handlers.blacklist.keyboards import (
     get_cancel_keyboard,
-    get_skip_phone_keyboard,
+    get_skip_keyboard,
     get_confirmation_keyboard,
+    get_reasons_keyboard,
     BTN_CANCEL_PROCESS,
-    BTN_SKIP_PHONE,
+    BTN_SKIP,
     CALLBACK_CONFIRM_ADD,
     CALLBACK_EDIT,
     CALLBACK_CANCEL,
+    CALLBACK_REASON_PREFIX,
+    POPULAR_REASONS,
 )
 from src.bot.utils import Validators
 
@@ -28,34 +31,39 @@ logger = logging.getLogger(__name__)
 # Сообщения для каждого шага
 STEP_MESSAGES = {
     BlacklistAddState.WAITING_FIO: (
-        "📝 <b>Шаг 1/6: ФИО</b>\n\n"
+        "📝 <b>Шаг 1/7: ФИО</b>\n\n"
         "Введите ФИО арендатора:\n"
         "<i>Формат: Фамилия Имя Отчество</i>"
     ),
     BlacklistAddState.WAITING_BIRTHDATE: (
-        "📅 <b>Шаг 2/6: Дата рождения</b>\n\n"
+        "📅 <b>Шаг 2/7: Дата рождения</b>\n\n"
         "Введите дату рождения:\n"
         "<i>Формат: ДД.ММ.ГГГГ</i>"
     ),
     BlacklistAddState.WAITING_PASSPORT: (
-        "🪪 <b>Шаг 3/6: Паспортные данные</b>\n\n"
+        "🪪 <b>Шаг 3/7: Паспортные данные</b>\n\n"
         "Введите серию и номер паспорта:\n"
         "<i>Формат: 1234 567890 или 1234567890</i>"
     ),
     BlacklistAddState.WAITING_DEPARTMENT_CODE: (
-        "🏢 <b>Шаг 4/6: Код подразделения</b>\n\n"
+        "🏢 <b>Шаг 4/7: Код подразделения</b>\n\n"
         "Введите код подразделения:\n"
         "<i>Формат: 123-456 или 123456 (6 цифр)</i>"
     ),
     BlacklistAddState.WAITING_PHONE: (
-        "📱 <b>Шаг 5/6: Номер телефона</b>\n\n"
+        "📱 <b>Шаг 5/7: Номер телефона</b>\n\n"
         "Введите номер телефона (если известен):\n"
         "<i>Формат: +79991234567</i>\n\n"
         "Или нажмите «Пропустить», если номер неизвестен."
     ),
     BlacklistAddState.WAITING_REASON: (
-        "📋 <b>Шаг 6/6: Причина</b>\n\n"
+        "📋 <b>Шаг 6/7: Причина</b>\n\n"
         "Укажите причину добавления в черный список:"
+    ),
+    BlacklistAddState.WAITING_COMMENT: (
+        "💬 <b>Шаг 7/7: Комментарий</b>\n\n"
+        "Добавьте комментарий (дополнительная информация):\n\n"
+        "Или нажмите «Пропустить», если комментарий не требуется."
     ),
 }
 
@@ -92,9 +100,30 @@ async def _send_step_message(
     """
     message_text = STEP_MESSAGES.get(state, "")
     
+    # Для шага с причиной — отправляем инлайн-кнопки с популярными причинами
+    if state == BlacklistAddState.WAITING_REASON:
+        # Сначала отправляем reply-клавиатуру с кнопкой отмены
+        await bot.send_message(
+            chat_id,
+            message_text,
+            parse_mode="HTML",
+            reply_markup=get_cancel_keyboard(),
+        )
+        
+        # Затем отправляем инлайн-клавиатуру с популярными причинами
+        sent_message = await bot.send_message(
+            chat_id,
+            "👇 <b>Выберите причину или введите свою:</b>",
+            parse_mode="HTML",
+            reply_markup=get_reasons_keyboard(),
+        )
+        await user_state_storage.set_last_bot_message(user_id, sent_message.message_id)
+        return
+    
     # Выбираем клавиатуру в зависимости от шага
-    if state == BlacklistAddState.WAITING_PHONE:
-        keyboard = get_skip_phone_keyboard()
+    # Для опциональных полей (телефон, комментарий) показываем кнопку "Пропустить"
+    if state in (BlacklistAddState.WAITING_PHONE, BlacklistAddState.WAITING_COMMENT):
+        keyboard = get_skip_keyboard()
     else:
         keyboard = get_cancel_keyboard()
     
@@ -119,6 +148,7 @@ def _format_confirmation_message(data: BlacklistCollectionData) -> str:
         Отформатированное сообщение
     """
     phone_display = data.phone if data.phone else "Не указан"
+    comment_display = data.comment if data.comment else "Не указан"
     
     # Форматируем паспорт для отображения (XXXX XXXXXX)
     passport_display = data.passport
@@ -137,7 +167,8 @@ def _format_confirmation_message(data: BlacklistCollectionData) -> str:
         f"🪪 <b>Паспорт:</b> {passport_display}\n"
         f"🏢 <b>Код подразделения:</b> {dept_display}\n"
         f"📱 <b>Телефон:</b> {phone_display}\n"
-        f"📝 <b>Причина:</b> {data.reason}\n\n"
+        f"📝 <b>Причина:</b> {data.reason}\n"
+        f"💬 <b>Комментарий:</b> {comment_display}\n\n"
         "Выберите действие:"
     )
 
@@ -265,7 +296,7 @@ async def blacklist_message_handler(message: Message, bot: AsyncTeleBot) -> None
             next_state = state
     
     elif state == BlacklistAddState.WAITING_PHONE:
-        if text == BTN_SKIP_PHONE:
+        if text == BTN_SKIP:
             # Пропуск телефона
             await user_state_storage.update_data(user_id, phone=None)
             next_state = BlacklistAddState.WAITING_REASON
@@ -282,10 +313,24 @@ async def blacklist_message_handler(message: Message, bot: AsyncTeleBot) -> None
         result = Validators.validate_reason(text)
         if result.is_valid:
             await user_state_storage.update_data(user_id, reason=result.normalized)
-            next_state = BlacklistAddState.CONFIRMATION
+            next_state = BlacklistAddState.WAITING_COMMENT
         else:
             error_message = result.error
             next_state = state
+    
+    elif state == BlacklistAddState.WAITING_COMMENT:
+        if text == BTN_SKIP:
+            # Пропуск комментария
+            await user_state_storage.update_data(user_id, comment=None)
+            next_state = BlacklistAddState.CONFIRMATION
+        else:
+            # Комментарий без строгой валидации, только ограничение длины
+            if len(text) > 1000:
+                error_message = "Комментарий не должен превышать 1000 символов"
+                next_state = state
+            else:
+                await user_state_storage.update_data(user_id, comment=text)
+                next_state = BlacklistAddState.CONFIRMATION
     
     # Устанавливаем следующее состояние
     await user_state_storage.set_state(user_id, next_state)
@@ -309,7 +354,11 @@ async def blacklist_message_handler(message: Message, bot: AsyncTeleBot) -> None
             step_text = STEP_MESSAGES.get(next_state, "")
             full_text = f"⚠️ <b>{error_message}</b>\n\n{step_text}"
             
-            keyboard = get_skip_phone_keyboard() if next_state == BlacklistAddState.WAITING_PHONE else get_cancel_keyboard()
+            # Для опциональных полей показываем кнопку "Пропустить"
+            if next_state in (BlacklistAddState.WAITING_PHONE, BlacklistAddState.WAITING_COMMENT):
+                keyboard = get_skip_keyboard()
+            else:
+                keyboard = get_cancel_keyboard()
             
             sent_message = await bot.send_message(
                 chat_id,
@@ -324,7 +373,7 @@ async def blacklist_message_handler(message: Message, bot: AsyncTeleBot) -> None
 
 async def blacklist_callback_handler(call: CallbackQuery, bot: AsyncTeleBot) -> None:
     """
-    Обработчик инлайн-кнопок подтверждения.
+    Обработчик инлайн-кнопок (подтверждение и выбор причины).
     
     Args:
         call: Callback query
@@ -337,6 +386,26 @@ async def blacklist_callback_handler(call: CallbackQuery, bot: AsyncTeleBot) -> 
     
     # Подтверждаем получение callback
     await bot.answer_callback_query(call.id)
+    
+    # Обработка выбора причины из списка
+    if callback_data.startswith(CALLBACK_REASON_PREFIX):
+        reason_index = int(callback_data.replace(CALLBACK_REASON_PREFIX, ""))
+        
+        if 0 <= reason_index < len(POPULAR_REASONS):
+            selected_reason = POPULAR_REASONS[reason_index]
+            
+            # Удаляем сообщение с кнопками причин
+            await _delete_message_safe(bot, chat_id, message_id)
+            
+            # Сохраняем причину
+            await user_state_storage.update_data(user_id, reason=selected_reason)
+            
+            # Переходим к следующему шагу
+            await user_state_storage.set_state(user_id, BlacklistAddState.WAITING_COMMENT)
+            await _send_step_message(bot, chat_id, user_id, BlacklistAddState.WAITING_COMMENT)
+            
+            logger.debug(f"Пользователь {user_id} выбрал причину: {selected_reason}")
+        return
     
     if callback_data == CALLBACK_CONFIRM_ADD:
         # Удаляем сообщение подтверждения
@@ -386,4 +455,3 @@ async def blacklist_callback_handler(call: CallbackQuery, bot: AsyncTeleBot) -> 
         )
         
         logger.info(f"Пользователь {user_id} отменил добавление в ЧС")
-
