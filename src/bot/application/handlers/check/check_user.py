@@ -111,20 +111,23 @@ def _format_search_results(
     
     for i, record in enumerate(results, 1):
         lines.append(f"━━━ Запись #{i} ━━━")
-        lines.append(f"🏢 <b>Организация:</b> {record.get('organization_name', 'Неизвестно')}")
-        lines.append(f"👤 <b>Добавил:</b> TG ID {record.get('admin_telegram_id', 'Неизвестно')}")
-        lines.append(f"🎭 <b>Роль админа:</b> {record.get('admin_role', 'Неизвестно')}")
-        lines.append(f"📅 <b>Дата добавления:</b> {record.get('created', 'Неизвестно')}")
-        lines.append(f"📝 <b>Причина:</b> {record.get('reason', 'Не указана')}")
-        
-        comment = record.get('comment')
-        if comment:
-            lines.append(f"💬 <b>Комментарий:</b> {comment}")
-        
+
         status = record.get('status', 'unknown')
         status_emoji = "🟢" if status == "active" else "🔴"
         status_text = "Активна" if status == "active" else "Неактивна"
         lines.append(f"{status_emoji} <b>Статус:</b> {status_text}")
+
+        lines.append(f"🏢 <b>Организация:</b> {record.get('organization_name', 'Неизвестно')}")
+        lines.append(f"👤 <b>Добавил:</b> ID {record.get('admin_telegram_id', 'Неизвестно')}\n")
+
+        lines.append(f"📅 <b>Дата добавления:</b> {record.get('created', 'Неизвестно')}\n")
+
+        lines.append(f"📝 <b>Причина:</b> {record.get('reason', 'Не указана')}")
+        
+        comment = record.get('comment')
+        if comment:
+            # Форматируем комментарий как цитату
+            lines.append(f"💬 <b>Комментарий:</b>\n<blockquote>{comment}</blockquote>")
         
         # Совпавшие данные
         matched = record.get('matched_fields', [])

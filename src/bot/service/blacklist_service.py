@@ -690,11 +690,19 @@ class BlacklistService:
                         'admin_telegram_id': admin.get('telegram_id', 'Неизвестно'),
                         'admin_role': admin.get('role', 'Неизвестно'),
                         'created': record.created.strftime('%d.%m.%Y %H:%M'),
+                        'created_datetime': record.created,  # Для сортировки
                         'reason': record.reason,
                         'comment': record.comment,
                         'status': record.status.value,
                         'matched_fields': matched_fields,
                     })
+            
+            # Сортируем результаты по дате создания (от старых к новым)
+            results.sort(key=lambda x: x['created_datetime'])
+            
+            # Удаляем временное поле для сортировки
+            for result in results:
+                result.pop('created_datetime', None)
             
             logger.info(f"Поиск по критериям: найдено {len(results)} записей")
             return results
