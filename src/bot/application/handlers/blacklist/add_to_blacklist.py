@@ -244,11 +244,15 @@ async def cancel_collection_handler(
     # Очищаем состояние
     await user_state_storage.clear(user_id)
     
+    # Получаем роль пользователя для отображения соответствующей клавиатуры
+    context = get_bot_context()
+    user_role = await context.access_service.get_user_role(user_id)
+    
     # Отправляем сообщение об отмене с меню
     await bot.send_message(
         chat_id,
         "❌ Процесс добавления в ЧС прерван.",
-        reply_markup=get_main_menu_keyboard(),
+        reply_markup=get_main_menu_keyboard(user_role),
     )
     
     logger.info(f"Пользователь {user_id} прервал добавление в ЧС")
@@ -454,10 +458,13 @@ async def blacklist_callback_handler(
         # Получаем admin из БД по telegram_id
         admin = await context.admin_repository.get_by_admin_id(user_id)
         if not admin:
+            # Получаем роль пользователя для отображения соответствующей клавиатуры
+            user_role = await context.access_service.get_user_role(user_id)
+            
             await bot.send_message(
                 chat_id,
                 "❌ Ошибка: администратор не найден в системе.",
-                reply_markup=get_main_menu_keyboard(),
+                reply_markup=get_main_menu_keyboard(user_role),
             )
             await user_state_storage.clear(user_id)
             return
@@ -474,10 +481,13 @@ async def blacklist_callback_handler(
         )
         
         if not admin_orgs:
+            # Получаем роль пользователя для отображения соответствующей клавиатуры
+            user_role = await context.access_service.get_user_role(user_id)
+            
             await bot.send_message(
                 chat_id,
                 "❌ Ошибка: у вас нет привязанных организаций.",
-                reply_markup=get_main_menu_keyboard(),
+                reply_markup=get_main_menu_keyboard(user_role),
             )
             await user_state_storage.clear(user_id)
             return
@@ -514,19 +524,22 @@ async def blacklist_callback_handler(
         # Очищаем состояние
         await user_state_storage.clear(user_id)
         
+        # Получаем роль пользователя для отображения соответствующей клавиатуры
+        user_role = await context.access_service.get_user_role(user_id)
+        
         if result.success:
             status_text = "⚠️ (повторное добавление)" if result.already_exists else ""
             await bot.send_message(
                 chat_id,
                 f"✅ Запись успешно добавлена в черный список! {status_text}",
-                reply_markup=get_main_menu_keyboard(),
+                reply_markup=get_main_menu_keyboard(user_role),
             )
             logger.info(f"Пользователь {user_id} добавил запись в ЧС: {data.fio}")
         else:
             await bot.send_message(
                 chat_id,
                 f"❌ Ошибка при добавлении: {result.error}",
-                reply_markup=get_main_menu_keyboard(),
+                reply_markup=get_main_menu_keyboard(user_role),
             )
             logger.error(f"Ошибка при добавлении в ЧС пользователем {user_id}: {result.error}")
     
@@ -550,10 +563,14 @@ async def blacklist_callback_handler(
         # Очищаем состояние
         await user_state_storage.clear(user_id)
         
+        # Получаем роль пользователя для отображения соответствующей клавиатуры
+        context = get_bot_context()
+        user_role = await context.access_service.get_user_role(user_id)
+        
         await bot.send_message(
             chat_id,
             "❌ Добавление в ЧС отменено.",
-            reply_markup=get_main_menu_keyboard(),
+            reply_markup=get_main_menu_keyboard(user_role),
         )
         
         logger.info(f"Пользователь {user_id} отменил добавление в ЧС")

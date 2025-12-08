@@ -19,7 +19,7 @@ from src.bot.application.handlers.check.keyboards import (
     CALLBACK_CHECK_CANCEL,
 )
 from src.bot.utils import SearchDataParser
-from src.bot.application.context import BotContext
+from src.bot.application.context import BotContext, get_bot_context
 
 logger = logging.getLogger(__name__)
 
@@ -194,10 +194,14 @@ async def check_message_handler(message: Message, bot: AsyncTeleBot, context: Bo
         await _delete_bot_messages(bot, chat_id, user_id)
         await user_state_storage.clear(user_id)
         
+        # Получаем роль пользователя для отображения соответствующей клавиатуры
+        bot_context = get_bot_context()
+        user_role = await bot_context.access_service.get_user_role(user_id)
+        
         await bot.send_message(
             chat_id,
             "❌ Проверка отменена.",
-            reply_markup=get_main_menu_keyboard(),
+            reply_markup=get_main_menu_keyboard(user_role),
         )
         logger.info(f"Пользователь {user_id} отменил проверку")
         return
@@ -280,21 +284,28 @@ async def check_callback_handler(call: CallbackQuery, bot: AsyncTeleBot, context
             # Форматируем результаты
             result_text = _format_search_results(results, check_data)
             
+            # Получаем роль пользователя для отображения соответствующей клавиатуры
+            user_role = await context.access_service.get_user_role(user_id)
+            
             await bot.send_message(
                 chat_id,
                 result_text,
                 parse_mode="HTML",
-                reply_markup=get_main_menu_keyboard(),
+                reply_markup=get_main_menu_keyboard(user_role),
             )
             
             logger.info(f"Пользователь {user_id} выполнил проверку, найдено: {len(results)}")
             
         except Exception as e:
             logger.error(f"Ошибка при поиске: {e}", exc_info=True)
+            
+            # Получаем роль пользователя для отображения соответствующей клавиатуры
+            user_role = await context.access_service.get_user_role(user_id)
+            
             await bot.send_message(
                 chat_id,
                 "❌ Произошла ошибка при поиске. Попробуйте позже.",
-                reply_markup=get_main_menu_keyboard(),
+                reply_markup=get_main_menu_keyboard(user_role),
             )
         
         # Очищаем состояние
@@ -328,10 +339,13 @@ async def check_callback_handler(call: CallbackQuery, bot: AsyncTeleBot, context
         # Очищаем состояние
         await user_state_storage.clear(user_id)
         
+        # Получаем роль пользователя для отображения соответствующей клавиатуры
+        user_role = await context.access_service.get_user_role(user_id)
+        
         await bot.send_message(
             chat_id,
             "❌ Проверка отменена.",
-            reply_markup=get_main_menu_keyboard(),
+            reply_markup=get_main_menu_keyboard(user_role),
         )
         
         logger.info(f"Пользователь {user_id} отменил проверку через инлайн-кнопку")
