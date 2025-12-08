@@ -224,4 +224,34 @@ class OrganizationRepository:
         except Exception as e:
             logger.error(f"Ошибка при проверке организации {org_id}: {e}", exc_info=True)
             raise
+    
+    async def get_organization_ids_by_admin_telegram_id(self, admin_telegram_id: int) -> List[int]:
+        """
+        Получить список ID организаций, к которым привязан администратор.
+        
+        Args:
+            admin_telegram_id: Telegram ID администратора
+            
+        Returns:
+            Список ID организаций
+        """
+        try:
+            query = """
+                SELECT o.id
+                FROM organizations o
+                JOIN admin_organizations ao ON o.id = ao.organization_id
+                JOIN admins a ON ao.admin_id = a.id
+                WHERE a.admin_id = $1
+                ORDER BY o.id
+            """
+            
+            rows = await self._db.fetch(query, admin_telegram_id)
+            return [row["id"] for row in rows]
+            
+        except Exception as e:
+            logger.error(
+                f"Ошибка при получении организаций для админа {admin_telegram_id}: {e}",
+                exc_info=True
+            )
+            raise
 

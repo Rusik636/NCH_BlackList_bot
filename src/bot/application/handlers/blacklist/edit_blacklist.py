@@ -140,30 +140,40 @@ def _format_search_results(results: List[dict]) -> str:
     return "\n".join(lines)
 
 
-async def _search_by_record_id(context, record_id_short: str) -> Optional[dict]:
+async def _search_by_record_id(
+    context, 
+    record_id_short: str, 
+    organization_ids: List[int]
+) -> Optional[dict]:
     """
-    Поиск записи по последним 6 символам ID.
+    Поиск записи по последним 6 символам ID с фильтрацией по организациям.
     
     Args:
         context: BotContext
         record_id_short: Последние 6 символов ID записи
+        organization_ids: Список ID организаций для фильтрации
     
     Returns:
         Словарь с данными записи или None
     """
+    if not organization_ids:
+        return None
+    
     try:
         # Ищем все записи, у которых ID заканчивается на указанные символы
+        # и которые принадлежат указанным организациям
         query = """
             SELECT br.*, o.name as organization_name, a.admin_id as admin_telegram_id
             FROM blacklist_records br
             JOIN organizations o ON br.organization_id = o.id
             JOIN admins a ON br.added_by_admin_id = a.id
             WHERE br.id::text LIKE $1
+              AND br.organization_id = ANY($2::int[])
             ORDER BY br.created DESC
             LIMIT 10
         """
         pattern = f"%{record_id_short}"
-        rows = await context.db_manager.fetch(query, pattern)
+        rows = await context.db_manager.fetch(query, pattern, organization_ids)
         
         if not rows:
             return None
@@ -174,6 +184,7 @@ async def _search_by_record_id(context, record_id_short: str) -> Optional[dict]:
         # Форматируем как результат поиска
         return {
             'record_id': str(row['id']),
+            'organization_id': row['organization_id'],
             'organization_name': row['organization_name'],
             'admin_telegram_id': row['admin_telegram_id'],
             'created': row['created'].strftime('%d.%m.%Y %H:%M'),
@@ -260,12 +271,33 @@ async def edit_message_handler(message: Message, bot: AsyncTeleBot, context) -> 
     await _delete_bot_messages(bot, chat_id, user_id)
     
     if state == EditState.WAITING_INPUT:
+        # Получаем организации пользователя
+        admin = await context.admin_repository.get_by_admin_id(user_id)
+        if not admin:
+            await bot.send_message(
+                chat_id,
+                "❌ Ошибка: администратор не найден в системе.",
+                reply_markup=get_cancel_check_keyboard(),
+            )
+            return
+        
+        # Получаем ID организаций пользователя
+        organization_ids = await context.organization_repository.get_organization_ids_by_admin_telegram_id(user_id)
+        
+        if not organization_ids:
+            await bot.send_message(
+                chat_id,
+                "❌ Ошибка: у вас нет привязанных организаций.",
+                reply_markup=get_cancel_check_keyboard(),
+            )
+            return
+        
         results = []
         
         # Проверяем, является ли ввод ID записи (6 hex символов)
         if len(text) == 6 and all(c in '0123456789abcdefABCDEF' for c in text):
-            # Пытаемся найти по ID
-            record = await _search_by_record_id(context, text)
+            # Пытаемся найти по ID (только записи своей организации)
+            record = await _search_by_record_id(context, text, organization_ids)
             if record:
                 results = [record]
         
@@ -274,8 +306,9 @@ async def edit_message_handler(message: Message, bot: AsyncTeleBot, context) -> 
             # Парсим введенные данные
             parsed = SearchDataParser.parse(text)
             
-            # Выполняем поиск по критериям
-            results = await context.blacklist_service.search_by_criteria(
+            # Выполняем поиск по критериям с фильтрацией по организациям пользователя
+            results = await context.blacklist_service.search_by_criteria_for_organizations(
+                organization_ids=organization_ids,
                 fio=parsed.fio,
                 passport=parsed.passport,
                 birthdate=parsed.birthdate,
@@ -287,7 +320,7 @@ async def edit_message_handler(message: Message, bot: AsyncTeleBot, context) -> 
             # Записи не найдены
             sent_message = await bot.send_message(
                 chat_id,
-                "❌ Записи не найдены. Попробуйте ввести другие данные.",
+                "❌ Записи вашей организации не найдены. Попробуйте ввести другие данные.",
                 parse_mode="HTML",
                 reply_markup=get_cancel_check_keyboard(),
             )
@@ -350,6 +383,47 @@ async def edit_callback_handler(call: CallbackQuery, bot: AsyncTeleBot, context)
             )
             return
         
+        # Проверяем, что запись принадлежит организации пользователя
+        # Получаем организации пользователя
+        organization_ids = await context.organization_repository.get_organization_ids_by_admin_telegram_id(user_id)
+        
+        if not organization_ids:
+            await bot.answer_callback_query(
+                call.id,
+                "❌ У вас нет привязанных организаций!",
+                show_alert=True
+            )
+            return
+        
+        # Получаем organization_id из записи
+        record_org_id = selected_record.get('organization_id')
+        
+        # Если organization_id не указан в результатах, получаем его из БД
+        if not record_org_id:
+            record_obj = await context.blacklist_record_repository.get_by_id(UUID(record_id_str))
+            if record_obj:
+                record_org_id = record_obj.organization_id
+            else:
+                await bot.answer_callback_query(
+                    call.id,
+                    "❌ Запись не найдена в базе данных!",
+                    show_alert=True
+                )
+                return
+        
+        # Проверяем принадлежность к организации пользователя
+        if record_org_id not in organization_ids:
+            await bot.answer_callback_query(
+                call.id,
+                "❌ У вас нет прав редактировать эту запись!",
+                show_alert=True
+            )
+            logger.warning(
+                f"Пользователь {user_id} попытался выбрать запись {record_id_str} "
+                f"из чужой организации {record_org_id}"
+            )
+            return
+        
         # Сохраняем выбранную запись
         edit_data.selected_record_id = record_id_str
         await user_state_storage.set_edit_data(user_id, edit_data)
@@ -400,6 +474,20 @@ async def edit_callback_handler(call: CallbackQuery, bot: AsyncTeleBot, context)
                 call.id,
                 "❌ Администратор не найден!",
                 show_alert=True
+            )
+            return
+        
+        # Проверяем, что запись принадлежит организации пользователя
+        organization_ids = await context.organization_repository.get_organization_ids_by_admin_telegram_id(user_id)
+        if record.organization_id not in organization_ids:
+            await bot.answer_callback_query(
+                call.id,
+                "❌ У вас нет прав редактировать эту запись!",
+                show_alert=True
+            )
+            logger.warning(
+                f"Пользователь {user_id} попытался редактировать запись {record_id} "
+                f"из чужой организации {record.organization_id}"
             )
             return
         

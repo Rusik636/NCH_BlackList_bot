@@ -5,6 +5,7 @@ from src.bot.application.storage.user_state_storage import (
     UserState,
     BlacklistCollectionData,
     CheckSearchData,
+    EditData,
     user_state_storage,
 )
 
@@ -13,6 +14,7 @@ __all__ = [
     "UserState",
     "BlacklistCollectionData",
     "CheckSearchData",
+    "EditData",
     "user_state_storage",
 ]
 

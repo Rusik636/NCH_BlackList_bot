@@ -711,6 +711,60 @@ class BlacklistService:
             logger.error(f"Ошибка при поиске по критериям: {e}", exc_info=True)
             return []
     
+    async def search_by_criteria_for_organizations(
+        self,
+        organization_ids: List[int],
+        fio: Optional[str] = None,
+        passport: Optional[str] = None,
+        birthdate: Optional[str] = None,
+        department_code: Optional[str] = None,
+        phone: Optional[str] = None,
+    ) -> List[dict]:
+        """
+        Поиск в черном списке по комбинации критериев с фильтрацией по организациям.
+        
+        Аналогичен search_by_criteria, но возвращает только записи из указанных организаций.
+        
+        Args:
+            organization_ids: Список ID организаций для фильтрации
+            fio: ФИО (в нижнем регистре)
+            passport: Серия и номер паспорта (10 цифр)
+            birthdate: Дата рождения (ISO формат)
+            department_code: Код подразделения (6 цифр)
+            phone: Телефон (нормализованный)
+            
+        Returns:
+            Список словарей с информацией о найденных записях
+        """
+        if not organization_ids:
+            return []
+        
+        try:
+            # Получаем результаты обычного поиска
+            all_results = await self.search_by_criteria(
+                fio=fio,
+                passport=passport,
+                birthdate=birthdate,
+                department_code=department_code,
+                phone=phone,
+            )
+            
+            # Фильтруем по организациям
+            filtered_results = [
+                result for result in all_results
+                if result.get('organization_id') in organization_ids
+            ]
+            
+            logger.info(
+                f"Поиск по критериям для организаций {organization_ids}: "
+                f"найдено {len(filtered_results)} из {len(all_results)} записей"
+            )
+            return filtered_results
+            
+        except Exception as e:
+            logger.error(f"Ошибка при поиске по критериям для организаций: {e}", exc_info=True)
+            return []
+    
     async def _get_admin_info(self, admin_uuid: UUID) -> dict:
         """
         Получить информацию об администраторе.
