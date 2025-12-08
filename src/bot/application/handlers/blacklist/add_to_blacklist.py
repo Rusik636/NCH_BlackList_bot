@@ -152,7 +152,8 @@ async def _send_step_message(
         reply_markup=keyboard,
     )
     
-    await user_state_storage.set_last_bot_message(user_id, sent_message.message_id)
+    # Используем add_bot_message для единообразного отслеживания
+    await user_state_storage.add_bot_message(user_id, sent_message.message_id)
 
 
 def _format_confirmation_message(
@@ -237,10 +238,8 @@ async def cancel_collection_handler(
     # Удаляем сообщение пользователя
     await _delete_message_safe(bot, chat_id, message.message_id)
     
-    # Удаляем последнее сообщение бота
-    last_msg_id = await user_state_storage.get_last_bot_message(user_id)
-    if last_msg_id:
-        await _delete_message_safe(bot, chat_id, last_msg_id)
+    # Удаляем все сообщения бота (включая шаг WAITING_REASON с 2 сообщениями)
+    await _delete_bot_messages(bot, chat_id, user_id)
     
     # Очищаем состояние
     await user_state_storage.clear(user_id)
@@ -284,10 +283,8 @@ async def blacklist_message_handler(
     # Удаляем сообщение пользователя (защита персональных данных)
     await _delete_message_safe(bot, chat_id, message.message_id)
     
-    # Удаляем предыдущее сообщение бота
-    last_msg_id = await user_state_storage.get_last_bot_message(user_id)
-    if last_msg_id:
-        await _delete_message_safe(bot, chat_id, last_msg_id)
+    # Удаляем все предыдущие сообщения бота (включая шаг WAITING_REASON с 2 сообщениями)
+    await _delete_bot_messages(bot, chat_id, user_id)
     
     # Обработка в зависимости от состояния
     next_state = None

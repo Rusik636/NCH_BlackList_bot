@@ -54,7 +54,8 @@ class BlacklistPerson:
         return cls(
             id=UUID(str(row["id"])),
             organization_id=row["organization_id"],
-            hash_salt=row["hash_salt"],
+            # Fallback для совместимости со старыми записями до миграции
+            hash_salt=row.get("hash_salt", ""),
             fio_hash=row["fio_hash"],
             birthdate_hash=row["birthdate_hash"],
             passport_hash=row["passport_hash"],
