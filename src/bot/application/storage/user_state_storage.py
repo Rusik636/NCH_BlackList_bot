@@ -46,11 +46,11 @@ class UserState:
     Attributes:
         state: Текущее состояние FSM
         data: Собранные данные
-        last_bot_message_id: ID последнего сообщения бота (для удаления)
+        bot_message_ids: Список ID сообщений бота (для удаления)
     """
     state: Optional[BlacklistAddState] = None
     data: BlacklistCollectionData = field(default_factory=BlacklistCollectionData)
-    last_bot_message_id: Optional[int] = None
+    bot_message_ids: list = field(default_factory=list)
 
 
 class UserStateStorage:
@@ -125,9 +125,9 @@ class UserStateStorage:
             
             logger.debug(f"Данные пользователя {user_id} обновлены: {kwargs}")
     
-    async def set_last_bot_message(self, user_id: int, message_id: int) -> None:
+    async def add_bot_message(self, user_id: int, message_id: int) -> None:
         """
-        Сохранить ID последнего сообщения бота.
+        Добавить ID сообщения бота в список для последующего удаления.
         
         Args:
             user_id: Telegram ID пользователя
@@ -136,21 +136,61 @@ class UserStateStorage:
         async with self._lock:
             if user_id not in self._states:
                 self._states[user_id] = UserState()
-            self._states[user_id].last_bot_message_id = message_id
+            self._states[user_id].bot_message_ids.append(message_id)
     
-    async def get_last_bot_message(self, user_id: int) -> Optional[int]:
+    async def set_bot_messages(self, user_id: int, message_ids: list) -> None:
         """
-        Получить ID последнего сообщения бота.
+        Установить список ID сообщений бота (заменяет предыдущий список).
+        
+        Args:
+            user_id: Telegram ID пользователя
+            message_ids: Список ID сообщений
+        """
+        async with self._lock:
+            if user_id not in self._states:
+                self._states[user_id] = UserState()
+            self._states[user_id].bot_message_ids = list(message_ids)
+    
+    async def get_bot_messages(self, user_id: int) -> list:
+        """
+        Получить список ID сообщений бота.
         
         Args:
             user_id: Telegram ID пользователя
             
         Returns:
-            ID сообщения или None
+            Список ID сообщений (пустой список если нет)
         """
         async with self._lock:
             user_state = self._states.get(user_id)
-            return user_state.last_bot_message_id if user_state else None
+            return list(user_state.bot_message_ids) if user_state else []
+    
+    async def clear_bot_messages(self, user_id: int) -> list:
+        """
+        Очистить и вернуть список ID сообщений бота.
+        
+        Args:
+            user_id: Telegram ID пользователя
+            
+        Returns:
+            Список ID сообщений, которые были очищены
+        """
+        async with self._lock:
+            if user_id not in self._states:
+                return []
+            messages = list(self._states[user_id].bot_message_ids)
+            self._states[user_id].bot_message_ids = []
+            return messages
+    
+    # Алиасы для обратной совместимости
+    async def set_last_bot_message(self, user_id: int, message_id: int) -> None:
+        """Алиас для set_bot_messages с одним сообщением."""
+        await self.set_bot_messages(user_id, [message_id])
+    
+    async def get_last_bot_message(self, user_id: int) -> Optional[int]:
+        """Получить последний ID сообщения бота (для совместимости)."""
+        messages = await self.get_bot_messages(user_id)
+        return messages[-1] if messages else None
     
     async def clear(self, user_id: int) -> None:
         """

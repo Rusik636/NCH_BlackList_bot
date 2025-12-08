@@ -22,8 +22,8 @@ class BlacklistHistory:
     Запись истории изменений черного списка.
     
     Attributes:
-        id: Уникальный UUID идентификатор
-        blacklist_record_id: ID записи черного списка
+        id: Уникальный числовой идентификатор (SERIAL)
+        blacklist_record_id: UUID записи черного списка
         action: Тип действия
         changed_by_admin_id: UUID админа, выполнившего действие
         old_reason: Предыдущая причина (для обновлений)
@@ -33,7 +33,7 @@ class BlacklistHistory:
         comment: Комментарий к изменению
         created: Дата и время изменения
     """
-    id: UUID
+    id: int
     blacklist_record_id: UUID
     action: BlacklistAction
     changed_by_admin_id: Optional[UUID]
@@ -58,7 +58,7 @@ class BlacklistHistory:
         admin_id = row.get("changed_by_admin_id")
         
         return cls(
-            id=UUID(str(row["id"])),
+            id=int(row["id"]),
             blacklist_record_id=UUID(str(row["blacklist_record_id"])),
             action=BlacklistAction(row["action"]),
             changed_by_admin_id=UUID(str(admin_id)) if admin_id else None,

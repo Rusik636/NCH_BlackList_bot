@@ -9,6 +9,7 @@ from telebot.types import Message, CallbackQuery
 
 from src.bot.application.states import BlacklistAddState
 from src.bot.application.storage import user_state_storage, BlacklistCollectionData
+from src.bot.application.context import get_bot_context
 from src.bot.application.keyboard import get_main_menu_keyboard
 from src.bot.application.handlers.blacklist.keyboards import (
     get_cancel_keyboard,
@@ -24,6 +25,7 @@ from src.bot.application.handlers.blacklist.keyboards import (
     POPULAR_REASONS,
 )
 from src.bot.utils import Validators
+from src.bot.service.hash_service import PersonalData
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +70,11 @@ STEP_MESSAGES = {
 }
 
 
-async def _delete_message_safe(bot: AsyncTeleBot, chat_id: int, message_id: int) -> None:
+async def _delete_message_safe(
+    bot: AsyncTeleBot, 
+    chat_id: int, 
+    message_id: int
+) -> None:
     """
     Безопасное удаление сообщения (игнорирует ошибки).
     
@@ -137,7 +143,9 @@ async def _send_step_message(
     await user_state_storage.set_last_bot_message(user_id, sent_message.message_id)
 
 
-def _format_confirmation_message(data: BlacklistCollectionData) -> str:
+def _format_confirmation_message(
+    data: BlacklistCollectionData
+) -> str:
     """
     Сформировать сообщение для подтверждения данных.
     
@@ -173,7 +181,10 @@ def _format_confirmation_message(data: BlacklistCollectionData) -> str:
     )
 
 
-async def add_to_blacklist_handler(message: Message, bot: AsyncTeleBot) -> None:
+async def add_to_blacklist_handler(
+    message: Message, 
+    bot: AsyncTeleBot
+) -> None:
     """
     Обработчик нажатия кнопки "Добавить в ЧС".
     Начинает процесс сбора данных.
@@ -197,7 +208,10 @@ async def add_to_blacklist_handler(message: Message, bot: AsyncTeleBot) -> None:
     await _send_step_message(bot, chat_id, user_id, BlacklistAddState.WAITING_FIO)
 
 
-async def cancel_collection_handler(message: Message, bot: AsyncTeleBot) -> None:
+async def cancel_collection_handler(
+    message: Message, 
+    bot: AsyncTeleBot
+) -> None:
     """
     Обработчик кнопки "Прервать процесс".
     
@@ -229,7 +243,10 @@ async def cancel_collection_handler(message: Message, bot: AsyncTeleBot) -> None
     logger.info(f"Пользователь {user_id} прервал добавление в ЧС")
 
 
-async def blacklist_message_handler(message: Message, bot: AsyncTeleBot) -> None:
+async def blacklist_message_handler(
+    message: Message, 
+    bot: AsyncTeleBot
+) -> None:
     """
     Обработчик сообщений во время сбора данных для черного списка.
     
@@ -371,7 +388,10 @@ async def blacklist_message_handler(message: Message, bot: AsyncTeleBot) -> None
             await _send_step_message(bot, chat_id, user_id, next_state)
 
 
-async def blacklist_callback_handler(call: CallbackQuery, bot: AsyncTeleBot) -> None:
+async def blacklist_callback_handler(
+    call: CallbackQuery, 
+    bot: AsyncTeleBot
+) -> None:
     """
     Обработчик инлайн-кнопок (подтверждение и выбор причины).
     
@@ -414,19 +434,87 @@ async def blacklist_callback_handler(call: CallbackQuery, bot: AsyncTeleBot) -> 
         # Получаем данные
         data = await user_state_storage.get_data(user_id)
         
-        # TODO: Здесь будет логика сохранения в БД
-        # Пока просто показываем успешное сообщение
+        # Получаем контекст и сервисы
+        context = get_bot_context()
+        
+        # Получаем admin из БД по telegram_id
+        admin = await context.admin_repository.get_by_admin_id(user_id)
+        if not admin:
+            await bot.send_message(
+                chat_id,
+                "❌ Ошибка: администратор не найден в системе.",
+                reply_markup=get_main_menu_keyboard(),
+            )
+            await user_state_storage.clear(user_id)
+            return
+        
+        # Получаем организации админа
+        admin_orgs = await context.db_manager.fetch(
+            """
+            SELECT o.id, o.name, o.hash_salt 
+            FROM organizations o
+            JOIN admin_organizations ao ON o.id = ao.organization_id
+            WHERE ao.admin_id = $1
+            """,
+            admin.id
+        )
+        
+        if not admin_orgs:
+            await bot.send_message(
+                chat_id,
+                "❌ Ошибка: у вас нет привязанных организаций.",
+                reply_markup=get_main_menu_keyboard(),
+            )
+            await user_state_storage.clear(user_id)
+            return
+        
+        # Используем первую организацию (TODO: добавить выбор организации)
+        org = admin_orgs[0]
+        
+        # Разбираем ФИО на части
+        fio_parts = data.fio.split() if data.fio else []
+        surname = fio_parts[0] if len(fio_parts) > 0 else ""
+        name = fio_parts[1] if len(fio_parts) > 1 else ""
+        patronymic = " ".join(fio_parts[2:]) if len(fio_parts) > 2 else ""
+        
+        # Создаём PersonalData для хеширования
+        personal_data = PersonalData(
+            surname=surname,
+            name=name,
+            patronymic=patronymic,
+            birthdate=data.birthdate or "",
+            passport=data.passport or "",
+            department_code=data.department_code or "",
+            phone=data.phone or "",
+        )
+        
+        # Добавляем в черный список через сервис
+        result = await context.blacklist_service.add_to_blacklist(
+            organization_id=org["id"],
+            admin_id=admin.id,
+            personal_data=personal_data,
+            reason=data.reason or "Не указана",
+            comment=data.comment,
+        )
         
         # Очищаем состояние
         await user_state_storage.clear(user_id)
         
-        await bot.send_message(
-            chat_id,
-            "✅ Запись успешно добавлена в черный список!",
-            reply_markup=get_main_menu_keyboard(),
-        )
-        
-        logger.info(f"Пользователь {user_id} добавил запись в ЧС: {data.fio}")
+        if result.success:
+            status_text = "⚠️ (повторное добавление)" if result.already_exists else ""
+            await bot.send_message(
+                chat_id,
+                f"✅ Запись успешно добавлена в черный список! {status_text}",
+                reply_markup=get_main_menu_keyboard(),
+            )
+            logger.info(f"Пользователь {user_id} добавил запись в ЧС: {data.fio}")
+        else:
+            await bot.send_message(
+                chat_id,
+                f"❌ Ошибка при добавлении: {result.error}",
+                reply_markup=get_main_menu_keyboard(),
+            )
+            logger.error(f"Ошибка при добавлении в ЧС пользователем {user_id}: {result.error}")
     
     elif callback_data == CALLBACK_EDIT:
         # Удаляем сообщение подтверждения

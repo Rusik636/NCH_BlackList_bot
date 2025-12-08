@@ -13,7 +13,7 @@ from telebot import asyncio_helper
 from src.config import get_config
 from src.db.connection import DatabaseManager
 from src.db.table import initialize_tables
-from src.bot.application.context import BotContext
+from src.bot.application.context import BotContext, set_bot_context
 from src.bot.application.register_handlers import register_handlers
 
 # Логирование настраивается автоматически при загрузке конфигурации
@@ -55,6 +55,9 @@ class BotApplication:
             if not self.db_manager:
                 raise RuntimeError("База данных не инициализирована")
             self.context = BotContext(self.db_manager)
+            
+            # Устанавливаем глобальный контекст для доступа из хендлеров
+            set_bot_context(self.context)
             
             # Регистрация обработчиков
             register_handlers(self.bot, self.context)
