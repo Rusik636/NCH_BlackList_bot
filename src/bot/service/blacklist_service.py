@@ -528,4 +528,206 @@ class BlacklistService:
             Список записей истории
         """
         return await self._history_repo.get_by_record_id(record_id)
+    
+    async def search_by_criteria(
+        self,
+        fio: Optional[str] = None,
+        passport: Optional[str] = None,
+        birthdate: Optional[str] = None,
+        department_code: Optional[str] = None,
+        phone: Optional[str] = None,
+    ) -> List[dict]:
+        """
+        Поиск в черном списке по комбинации критериев.
+        
+        Алгоритм идентификации (минимум 2 совпадения):
+        1. Паспорт + код подразделения
+        1.1. Паспорт + ФИО
+        2. Паспорт + дата рождения
+        2.1. Паспорт + телефон
+        3. ФИО + дата рождения
+        4. ФИО + телефон
+        
+        Args:
+            fio: ФИО (в нижнем регистре)
+            passport: Серия и номер паспорта (10 цифр)
+            birthdate: Дата рождения (ISO формат)
+            department_code: Код подразделения (6 цифр)
+            phone: Телефон (нормализованный)
+            
+        Returns:
+            Список словарей с информацией о найденных записях
+        """
+        try:
+            results = []
+            all_orgs = await self._org_repo.get_all()
+            
+            if not all_orgs:
+                logger.debug("Нет организаций для поиска")
+                return []
+            
+            # Собираем все найденные person_ids с информацией о совпадениях
+            found_persons = {}  # {person_id: {'person': ..., 'matched_fields': [...], 'org': ...}}
+            
+            for org in all_orgs:
+                # Вычисляем хеши для текущей организации
+                hashes = {}
+                
+                if passport:
+                    hashes['passport'] = self._hash_service.compute_search_hash(
+                        "passport", passport, org.hash_salt
+                    )
+                
+                if department_code:
+                    hashes['department_code'] = self._hash_service.compute_search_hash(
+                        "department_code", department_code, org.hash_salt
+                    )
+                
+                if birthdate:
+                    hashes['birthdate'] = self._hash_service.compute_search_hash(
+                        "birthdate", birthdate, org.hash_salt
+                    )
+                
+                if phone:
+                    hashes['phone'] = self._hash_service.compute_search_hash(
+                        "phone", phone, org.hash_salt
+                    )
+                
+                if fio:
+                    hashes['fio'] = self._hash_service.compute_search_hash(
+                        "fio", fio, org.hash_salt
+                    )
+                
+                # Поиск по паспорту (самый уникальный идентификатор)
+                if 'passport' in hashes:
+                    person = await self._person_repo.find_by_passport_hash(
+                        org.id, hashes['passport']
+                    )
+                    
+                    if person:
+                        matched_fields = ['Паспорт']
+                        
+                        # Проверяем дополнительные совпадения
+                        if 'department_code' in hashes and person.department_code_hash == hashes['department_code']:
+                            matched_fields.append('Код подразделения')
+                        
+                        if 'birthdate' in hashes and person.birthdate_hash == hashes['birthdate']:
+                            matched_fields.append('Дата рождения')
+                        
+                        if 'phone' in hashes and person.phone_hash and person.phone_hash == hashes['phone']:
+                            matched_fields.append('Телефон')
+                        
+                        if 'fio' in hashes and person.fio_hash == hashes['fio']:
+                            matched_fields.append('ФИО')
+                        
+                        # Нужно минимум 2 совпадения
+                        if len(matched_fields) >= 2:
+                            if person.id not in found_persons:
+                                found_persons[person.id] = {
+                                    'person': person,
+                                    'matched_fields': matched_fields,
+                                    'org': org,
+                                }
+                            elif len(matched_fields) > len(found_persons[person.id]['matched_fields']):
+                                found_persons[person.id] = {
+                                    'person': person,
+                                    'matched_fields': matched_fields,
+                                    'org': org,
+                                }
+                
+                # Если паспорт не указан, ищем по ФИО + дата рождения или ФИО + телефон
+                if 'fio' in hashes and 'passport' not in hashes:
+                    persons = await self._person_repo.find_by_fio_hash(org.id, hashes['fio'])
+                    
+                    for person in persons:
+                        matched_fields = ['ФИО']
+                        
+                        if 'birthdate' in hashes and person.birthdate_hash == hashes['birthdate']:
+                            matched_fields.append('Дата рождения')
+                        
+                        if 'phone' in hashes and person.phone_hash and person.phone_hash == hashes['phone']:
+                            matched_fields.append('Телефон')
+                        
+                        if 'department_code' in hashes and person.department_code_hash == hashes['department_code']:
+                            matched_fields.append('Код подразделения')
+                        
+                        # Нужно минимум 2 совпадения
+                        if len(matched_fields) >= 2:
+                            if person.id not in found_persons:
+                                found_persons[person.id] = {
+                                    'person': person,
+                                    'matched_fields': matched_fields,
+                                    'org': org,
+                                }
+                            elif len(matched_fields) > len(found_persons[person.id]['matched_fields']):
+                                found_persons[person.id] = {
+                                    'person': person,
+                                    'matched_fields': matched_fields,
+                                    'org': org,
+                                }
+            
+            # Для каждого найденного пользователя получаем записи ЧС
+            for person_data in found_persons.values():
+                person = person_data['person']
+                matched_fields = person_data['matched_fields']
+                org = person_data['org']
+                
+                # Получаем записи ЧС
+                records = await self._record_repo.get_by_person_id(person.id)
+                
+                for record in records:
+                    # Получаем информацию об админе
+                    admin = await self._get_admin_info(record.added_by_admin_id)
+                    
+                    results.append({
+                        'person_id': str(person.id),
+                        'record_id': str(record.id),
+                        'organization_name': org.name,
+                        'organization_id': org.id,
+                        'admin_telegram_id': admin.get('telegram_id', 'Неизвестно'),
+                        'admin_role': admin.get('role', 'Неизвестно'),
+                        'created': record.created.strftime('%d.%m.%Y %H:%M'),
+                        'reason': record.reason,
+                        'comment': record.comment,
+                        'status': record.status.value,
+                        'matched_fields': matched_fields,
+                    })
+            
+            logger.info(f"Поиск по критериям: найдено {len(results)} записей")
+            return results
+            
+        except Exception as e:
+            logger.error(f"Ошибка при поиске по критериям: {e}", exc_info=True)
+            return []
+    
+    async def _get_admin_info(self, admin_uuid: UUID) -> dict:
+        """
+        Получить информацию об администраторе.
+        
+        Args:
+            admin_uuid: UUID администратора
+            
+        Returns:
+            Словарь с информацией об админе
+        """
+        try:
+            from src.bot.repo.admin_repository import AdminRepository
+            
+            # Используем существующий репозиторий через context если есть,
+            # иначе создаём временный запрос
+            query = """
+                SELECT admin_id, role FROM admins WHERE id = $1
+            """
+            row = await self._org_repo._db.fetchrow(query, admin_uuid)
+            
+            if row:
+                return {
+                    'telegram_id': row['admin_id'],
+                    'role': row['role'],
+                }
+            return {'telegram_id': 'Неизвестно', 'role': 'Неизвестно'}
+            
+        except Exception as e:
+            logger.error(f"Ошибка при получении информации об админе: {e}")
+            return {'telegram_id': 'Неизвестно', 'role': 'Неизвестно'}
 

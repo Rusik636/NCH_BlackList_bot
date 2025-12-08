@@ -8,6 +8,11 @@ from src.bot.application.handlers.blacklist import (
     blacklist_callback_handler,
     cancel_collection_handler,
 )
+from src.bot.application.handlers.check import (
+    check_user_handler,
+    check_message_handler,
+    check_callback_handler,
+)
 
 __all__ = [
     "start_handler",
@@ -16,5 +21,8 @@ __all__ = [
     "blacklist_message_handler",
     "blacklist_callback_handler",
     "cancel_collection_handler",
+    "check_user_handler",
+    "check_message_handler",
+    "check_callback_handler",
 ]
 
