@@ -246,6 +246,7 @@ class BlacklistService:
                 # Проверяем, есть ли в текущей организации
                 person, person_created = await self._person_repo.get_or_create(
                     organization_id,
+                    organization.hash_salt,
                     hashes
                 )
                 
@@ -560,51 +561,54 @@ class BlacklistService:
         """
         try:
             results = []
-            all_orgs = await self._org_repo.get_all()
             
-            if not all_orgs:
-                logger.debug("Нет организаций для поиска")
+            # Оптимизация: получаем только уникальные соли из существующих записей
+            # вместо перебора всех организаций
+            unique_salts = await self._person_repo.get_unique_salts()
+            
+            if not unique_salts:
+                logger.debug("Нет записей в ЧС для поиска")
                 return []
             
             # Собираем все найденные person_ids с информацией о совпадениях
-            found_persons = {}  # {person_id: {'person': ..., 'matched_fields': [...], 'org': ...}}
+            found_persons = {}  # {person_id: {'person': ..., 'matched_fields': [...]}}
             
-            for org in all_orgs:
-                # Вычисляем хеши для текущей организации
+            for salt in unique_salts:
+                # Вычисляем хеши с текущей солью
                 hashes = {}
                 
                 if passport:
                     hashes['passport'] = self._hash_service.compute_search_hash(
-                        "passport", passport, org.hash_salt
+                        "passport", passport, salt
                     )
                 
                 if department_code:
                     hashes['department_code'] = self._hash_service.compute_search_hash(
-                        "department_code", department_code, org.hash_salt
+                        "department_code", department_code, salt
                     )
                 
                 if birthdate:
                     hashes['birthdate'] = self._hash_service.compute_search_hash(
-                        "birthdate", birthdate, org.hash_salt
+                        "birthdate", birthdate, salt
                     )
                 
                 if phone:
                     hashes['phone'] = self._hash_service.compute_search_hash(
-                        "phone", phone, org.hash_salt
+                        "phone", phone, salt
                     )
                 
                 if fio:
                     hashes['fio'] = self._hash_service.compute_search_hash(
-                        "fio", fio, org.hash_salt
+                        "fio", fio, salt
                     )
                 
                 # Поиск по паспорту (самый уникальный идентификатор)
                 if 'passport' in hashes:
-                    person = await self._person_repo.find_by_passport_hash(
-                        org.id, hashes['passport']
+                    persons = await self._person_repo.find_by_passport_hash_global(
+                        hashes['passport']
                     )
                     
-                    if person:
+                    for person in persons:
                         matched_fields = ['Паспорт']
                         
                         # Проверяем дополнительные совпадения
@@ -626,18 +630,16 @@ class BlacklistService:
                                 found_persons[person.id] = {
                                     'person': person,
                                     'matched_fields': matched_fields,
-                                    'org': org,
                                 }
                             elif len(matched_fields) > len(found_persons[person.id]['matched_fields']):
                                 found_persons[person.id] = {
                                     'person': person,
                                     'matched_fields': matched_fields,
-                                    'org': org,
                                 }
                 
                 # Если паспорт не указан, ищем по ФИО + дата рождения или ФИО + телефон
                 if 'fio' in hashes and 'passport' not in hashes:
-                    persons = await self._person_repo.find_by_fio_hash(org.id, hashes['fio'])
+                    persons = await self._person_repo.find_by_fio_hash_global(hashes['fio'])
                     
                     for person in persons:
                         matched_fields = ['ФИО']
@@ -657,20 +659,21 @@ class BlacklistService:
                                 found_persons[person.id] = {
                                     'person': person,
                                     'matched_fields': matched_fields,
-                                    'org': org,
                                 }
                             elif len(matched_fields) > len(found_persons[person.id]['matched_fields']):
                                 found_persons[person.id] = {
                                     'person': person,
                                     'matched_fields': matched_fields,
-                                    'org': org,
                                 }
             
             # Для каждого найденного пользователя получаем записи ЧС
             for person_data in found_persons.values():
                 person = person_data['person']
                 matched_fields = person_data['matched_fields']
-                org = person_data['org']
+                
+                # Получаем информацию об организации через person.organization_id
+                org = await self._org_repo.get_by_id(person.organization_id)
+                org_name = org.name if org else "Неизвестно"
                 
                 # Получаем записи ЧС
                 records = await self._record_repo.get_by_person_id(person.id)
@@ -682,8 +685,8 @@ class BlacklistService:
                     results.append({
                         'person_id': str(person.id),
                         'record_id': str(record.id),
-                        'organization_name': org.name,
-                        'organization_id': org.id,
+                        'organization_name': org_name,
+                        'organization_id': person.organization_id,
                         'admin_telegram_id': admin.get('telegram_id', 'Неизвестно'),
                         'admin_role': admin.get('role', 'Неизвестно'),
                         'created': record.created.strftime('%d.%m.%Y %H:%M'),
@@ -730,4 +733,3 @@ class BlacklistService:
         except Exception as e:
             logger.error(f"Ошибка при получении информации об админе: {e}")
             return {'telegram_id': 'Неизвестно', 'role': 'Неизвестно'}
-

@@ -16,6 +16,9 @@ CREATE TABLE IF NOT EXISTS blacklist_persons (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
     
+    -- Соль организации (копируется при создании для оптимизации поиска)
+    hash_salt VARCHAR(64) NOT NULL,
+    
     -- Хеши персональных данных (SHA-256, hex)
     fio_hash VARCHAR(64) NOT NULL,
     birthdate_hash VARCHAR(64) NOT NULL,
@@ -33,6 +36,12 @@ CREATE TABLE IF NOT EXISTS blacklist_persons (
     -- Уникальность по всем основным хешам в рамках организации
     UNIQUE(organization_id, fio_hash, birthdate_hash, passport_hash)
 );
+"""
+
+# Индекс для поиска по соли (оптимизация поиска)
+SALT_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS idx_blacklist_persons_hash_salt 
+ON blacklist_persons(hash_salt);
 """
 
 # Индекс для поиска по организации
@@ -108,6 +117,9 @@ async def create_table(db_manager: DatabaseManager) -> None:
         # Создаем индексы
         await db_manager.execute(ORG_ID_INDEX_SQL)
         logger.debug("Индекс idx_blacklist_persons_org_id создан")
+        
+        await db_manager.execute(SALT_INDEX_SQL)
+        logger.debug("Индекс idx_blacklist_persons_hash_salt создан")
         
         await db_manager.execute(FIO_HASH_INDEX_SQL)
         logger.debug("Индекс idx_blacklist_persons_fio_hash создан")

@@ -16,6 +16,7 @@ class BlacklistPerson:
     Attributes:
         id: Уникальный UUID идентификатор
         organization_id: ID организации
+        hash_salt: Соль для хеширования (копия из организации)
         fio_hash: Хеш полного ФИО
         birthdate_hash: Хеш даты рождения
         passport_hash: Хеш паспорта
@@ -28,6 +29,7 @@ class BlacklistPerson:
     """
     id: UUID
     organization_id: int
+    hash_salt: str
     fio_hash: str
     birthdate_hash: str
     passport_hash: str
@@ -52,6 +54,7 @@ class BlacklistPerson:
         return cls(
             id=UUID(str(row["id"])),
             organization_id=row["organization_id"],
+            hash_salt=row["hash_salt"],
             fio_hash=row["fio_hash"],
             birthdate_hash=row["birthdate_hash"],
             passport_hash=row["passport_hash"],

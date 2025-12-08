@@ -327,4 +327,3 @@ async def check_callback_handler(call: CallbackQuery, bot: AsyncTeleBot, context
         )
         
         logger.info(f"Пользователь {user_id} отменил проверку через инлайн-кнопку")
-

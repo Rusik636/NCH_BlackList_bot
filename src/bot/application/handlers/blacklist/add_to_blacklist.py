@@ -89,6 +89,15 @@ async def _delete_message_safe(
         logger.debug(f"Не удалось удалить сообщение {message_id}: {e}")
 
 
+async def _delete_bot_messages(bot: AsyncTeleBot, chat_id: int, user_id: int) -> None:
+    """
+    Удаляет все отслеживаемые сообщения бота для пользователя.
+    """
+    message_ids = await user_state_storage.clear_bot_messages(user_id)
+    for msg_id in message_ids:
+        await _delete_message_safe(bot, chat_id, msg_id)
+
+
 async def _send_step_message(
     bot: AsyncTeleBot,
     chat_id: int,
@@ -109,21 +118,24 @@ async def _send_step_message(
     # Для шага с причиной — отправляем инлайн-кнопки с популярными причинами
     if state == BlacklistAddState.WAITING_REASON:
         # Сначала отправляем reply-клавиатуру с кнопкой отмены
-        await bot.send_message(
+        step_message = await bot.send_message(
             chat_id,
             message_text,
             parse_mode="HTML",
             reply_markup=get_cancel_keyboard(),
         )
+        # Отслеживаем первое сообщение
+        await user_state_storage.add_bot_message(user_id, step_message.message_id)
         
         # Затем отправляем инлайн-клавиатуру с популярными причинами
-        sent_message = await bot.send_message(
+        inline_message = await bot.send_message(
             chat_id,
             "👇 <b>Выберите причину или введите свою:</b>",
             parse_mode="HTML",
             reply_markup=get_reasons_keyboard(),
         )
-        await user_state_storage.set_last_bot_message(user_id, sent_message.message_id)
+        # Отслеживаем второе сообщение
+        await user_state_storage.add_bot_message(user_id, inline_message.message_id)
         return
     
     # Выбираем клавиатуру в зависимости от шага
@@ -256,6 +268,11 @@ async def blacklist_message_handler(
     """
     user_id = message.from_user.id
     chat_id = message.chat.id
+    
+    # Игнорируем нетекстовые сообщения (фото, стикеры и т.д.)
+    if message.text is None:
+        return
+    
     text = message.text.strip()
     
     # Получаем текущее состояние
@@ -414,8 +431,8 @@ async def blacklist_callback_handler(
         if 0 <= reason_index < len(POPULAR_REASONS):
             selected_reason = POPULAR_REASONS[reason_index]
             
-            # Удаляем сообщение с кнопками причин
-            await _delete_message_safe(bot, chat_id, message_id)
+            # Удаляем все сообщения бота (включая шаг и инлайн-кнопки)
+            await _delete_bot_messages(bot, chat_id, user_id)
             
             # Сохраняем причину
             await user_state_storage.update_data(user_id, reason=selected_reason)

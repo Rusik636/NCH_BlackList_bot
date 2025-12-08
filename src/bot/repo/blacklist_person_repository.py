@@ -34,6 +34,7 @@ class BlacklistPersonRepository:
     async def create(
         self,
         organization_id: int,
+        hash_salt: str,
         hashes: PersonHashes,
     ) -> BlacklistPerson:
         """
@@ -41,6 +42,7 @@ class BlacklistPersonRepository:
         
         Args:
             organization_id: ID организации
+            hash_salt: Соль организации для хеширования
             hashes: Хеши персональных данных
             
         Returns:
@@ -53,6 +55,7 @@ class BlacklistPersonRepository:
             query = """
                 INSERT INTO blacklist_persons (
                     organization_id,
+                    hash_salt,
                     fio_hash,
                     birthdate_hash,
                     passport_hash,
@@ -61,13 +64,14 @@ class BlacklistPersonRepository:
                     surname_hash,
                     phone_last10_hash
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                 RETURNING *
             """
             
             row = await self._db.fetchrow(
                 query,
                 organization_id,
+                hash_salt,
                 hashes.fio_hash,
                 hashes.birthdate_hash,
                 hashes.passport_hash,
@@ -298,6 +302,7 @@ class BlacklistPersonRepository:
     async def get_or_create(
         self,
         organization_id: int,
+        hash_salt: str,
         hashes: PersonHashes,
     ) -> tuple[BlacklistPerson, bool]:
         """
@@ -305,6 +310,7 @@ class BlacklistPersonRepository:
         
         Args:
             organization_id: ID организации
+            hash_salt: Соль организации
             hashes: Хеши персональных данных
             
         Returns:
@@ -315,7 +321,7 @@ class BlacklistPersonRepository:
         if existing:
             return existing, False
         
-        person = await self.create(organization_id, hashes)
+        person = await self.create(organization_id, hash_salt, hashes)
         return person, True
     
     async def delete(self, person_id: UUID) -> bool:
@@ -393,5 +399,67 @@ class BlacklistPersonRepository:
             
         except Exception as e:
             logger.error(f"Ошибка при поиске по хешам: {e}", exc_info=True)
+            raise
+    
+    async def get_unique_salts(self) -> List[str]:
+        """
+        Получить список уникальных солей из всех записей.
+        Оптимизация: вместо перебора всех организаций,
+        получаем только соли, которые реально используются.
+        
+        Returns:
+            Список уникальных солей
+        """
+        try:
+            query = "SELECT DISTINCT hash_salt FROM blacklist_persons"
+            rows = await self._db.fetch(query)
+            return [row["hash_salt"] for row in rows]
+            
+        except Exception as e:
+            logger.error(f"Ошибка при получении уникальных солей: {e}", exc_info=True)
+            raise
+    
+    async def find_by_passport_hash_global(
+        self,
+        passport_hash: str,
+    ) -> List[BlacklistPerson]:
+        """
+        Найти всех пользователей по хешу паспорта (глобальный поиск).
+        
+        Args:
+            passport_hash: Хеш паспорта
+            
+        Returns:
+            Список найденных пользователей
+        """
+        try:
+            query = "SELECT * FROM blacklist_persons WHERE passport_hash = $1"
+            rows = await self._db.fetch(query, passport_hash)
+            return [BlacklistPerson.from_db_row(row) for row in rows]
+            
+        except Exception as e:
+            logger.error(f"Ошибка при глобальном поиске по паспорту: {e}", exc_info=True)
+            raise
+    
+    async def find_by_fio_hash_global(
+        self,
+        fio_hash: str,
+    ) -> List[BlacklistPerson]:
+        """
+        Найти всех пользователей по хешу ФИО (глобальный поиск).
+        
+        Args:
+            fio_hash: Хеш ФИО
+            
+        Returns:
+            Список найденных пользователей
+        """
+        try:
+            query = "SELECT * FROM blacklist_persons WHERE fio_hash = $1"
+            rows = await self._db.fetch(query, fio_hash)
+            return [BlacklistPerson.from_db_row(row) for row in rows]
+            
+        except Exception as e:
+            logger.error(f"Ошибка при глобальном поиске по ФИО: {e}", exc_info=True)
             raise
 
