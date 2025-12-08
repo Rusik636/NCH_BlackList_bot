@@ -245,7 +245,7 @@ class Validators:
         Правила:
         - От 10 до 15 цифр
         - Поддерживаются форматы: +7..., 8..., 7...
-        - Нормализуется к формату без кода страны (10 цифр)
+        - Нормализуется к формату +79991234567
         
         Args:
             phone: Строка с номером телефона
@@ -271,17 +271,28 @@ class Validators:
                 f"Номер телефона слишком длинный. Максимум 15 цифр"
             )
         
-        # Нормализация российских номеров
+        # Нормализация российских номеров к формату +79991234567
         if len(digits) == 11:
-            # Формат 8XXXXXXXXXX или 7XXXXXXXXXX → XXXXXXXXXX
-            if digits[0] in ('7', '8'):
-                digits = digits[1:]
+            # Формат 8XXXXXXXXXX или 7XXXXXXXXXX → 7XXXXXXXXXX
+            if digits[0] == '8':
+                digits = '7' + digits[1:]
+            elif digits[0] != '7':
+                # Если не начинается с 7 или 8, добавляем 7
+                digits = '7' + digits
+        elif len(digits) == 10:
+            # Формат XXXXXXXXXX → 7XXXXXXXXXX
+            digits = '7' + digits
         elif len(digits) == 12:
-            # Формат +7XXXXXXXXXX (если + был удален ранее)
-            if digits[:2] == '79' or digits[:2] == '78':
-                digits = digits[1:]
+            # Формат +7XXXXXXXXXX (если + был удален ранее) → 7XXXXXXXXXX
+            if digits.startswith('7'):
+                digits = digits
+            else:
+                digits = '7' + digits[1:]
         
-        return ValidationResult(True, normalized=digits)
+        # Приводим к формату +79991234567
+        normalized = '+' + digits if not digits.startswith('+') else digits
+        
+        return ValidationResult(True, normalized=normalized)
     
     # =========================================================================
     # Причина добавления в ЧС

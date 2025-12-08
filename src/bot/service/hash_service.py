@@ -84,16 +84,41 @@ class HashService:
     
     def _normalize_phone(self, phone: str) -> str:
         """
-        Нормализация номера телефона.
-        Оставляет только цифры.
+        Нормализация номера телефона к формату +79991234567.
         
         Args:
             phone: Исходный номер телефона
             
         Returns:
-            Нормализованный номер (только цифры)
+            Нормализованный номер в формате +79991234567
         """
-        return re.sub(r'\D', '', phone)
+        # Удаляем все нецифровые символы кроме +
+        digits = re.sub(r'[^\d+]', '', phone)
+        
+        # Если есть +, убираем его для обработки
+        has_plus = digits.startswith('+')
+        if has_plus:
+            digits = digits[1:]
+        
+        # Нормализация российских номеров
+        if len(digits) == 11:
+            # Формат 8XXXXXXXXXX или 7XXXXXXXXXX → 7XXXXXXXXXX
+            if digits[0] == '8':
+                digits = '7' + digits[1:]
+            elif digits[0] != '7':
+                digits = '7' + digits
+        elif len(digits) == 10:
+            # Формат XXXXXXXXXX → 7XXXXXXXXXX
+            digits = '7' + digits
+        elif len(digits) == 12:
+            # Формат 7XXXXXXXXXXX → берем последние 11 цифр
+            if digits.startswith('7'):
+                digits = digits[:11]
+            else:
+                digits = '7' + digits[1:]
+        
+        # Возвращаем в формате +79991234567
+        return '+' + digits
     
     def _normalize_date(self, date: str) -> str:
         """
@@ -179,15 +204,18 @@ class HashService:
         name = self._normalize_text(data.name)
         patronymic = self._normalize_text(data.patronymic)
         birthdate = self._normalize_date(data.birthdate)
-        passport = self._normalize_phone(data.passport)  # Убираем всё кроме цифр
-        department_code = self._normalize_phone(data.department_code)
+        # Паспорт и код подразделения - только цифры
+        passport = re.sub(r'\D', '', data.passport)
+        department_code = re.sub(r'\D', '', data.department_code)
+        # Телефон - формат +79991234567
         phone = self._normalize_phone(data.phone)
         
         # Полное ФИО
         fio = f"{surname} {name} {patronymic}"
         
-        # Последние 10 цифр телефона
-        phone_last10 = phone[-10:] if len(phone) >= 10 else phone
+        # Последние 10 цифр телефона (без +7)
+        # Для +79991234567 берем 9991234567
+        phone_last10 = phone[-10:] if len(phone) >= 12 else phone
         
         return PersonHashes(
             fio_hash=self._compute_hash(fio, org_salt),
@@ -222,8 +250,19 @@ class HashService:
             normalized = self._normalize_text(value)
         elif field == 'birthdate':
             normalized = self._normalize_date(value)
-        elif field in ['passport', 'department_code', 'phone', 'phone_last10']:
+        elif field == 'passport':
+            # Паспорт - только цифры
+            normalized = re.sub(r'\D', '', value)
+        elif field == 'department_code':
+            # Код подразделения - только цифры
+            normalized = re.sub(r'\D', '', value)
+        elif field == 'phone':
+            # Телефон - формат +79991234567
             normalized = self._normalize_phone(value)
+        elif field == 'phone_last10':
+            # Последние 10 цифр телефона (без +7)
+            normalized_phone = self._normalize_phone(value)
+            normalized = normalized_phone[-10:] if len(normalized_phone) >= 12 else normalized_phone
         else:
             normalized = value
         
