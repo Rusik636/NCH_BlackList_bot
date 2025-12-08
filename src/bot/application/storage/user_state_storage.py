@@ -11,12 +11,13 @@ from enum import Enum
 
 from src.bot.application.states.blacklist_states import BlacklistAddState
 from src.bot.application.states.check_states import CheckState
+from src.bot.application.states.edit_states import EditState
 
 logger = logging.getLogger(__name__)
 
 
 # Типы состояний FSM
-StateType = Union[BlacklistAddState, CheckState, None]
+StateType = Union[BlacklistAddState, CheckState, EditState, None]
 
 
 @dataclass
@@ -102,19 +103,36 @@ class CheckSearchData:
 
 
 @dataclass
+class EditData:
+    """
+    Данные для редактора записей ЧС.
+    
+    Attributes:
+        search_results: Список найденных записей (словари с данными)
+        selected_record_id: UUID выбранной записи для редактирования
+        last_message_id: ID последнего сообщения с результатами (для кнопки "Назад")
+    """
+    search_results: list = field(default_factory=list)
+    selected_record_id: Optional[str] = None
+    last_message_id: Optional[int] = None
+
+
+@dataclass
 class UserState:
     """
     Состояние пользователя в процессе взаимодействия с ботом.
     
     Attributes:
-        state: Текущее состояние FSM (BlacklistAddState или CheckState)
+        state: Текущее состояние FSM (BlacklistAddState, CheckState или EditState)
         data: Собранные данные для добавления в ЧС
         check_data: Данные для проверки в ЧС
+        edit_data: Данные для редактора записей ЧС
         bot_message_ids: Список ID сообщений бота (для удаления)
     """
     state: StateType = None
     data: BlacklistCollectionData = field(default_factory=BlacklistCollectionData)
     check_data: CheckSearchData = field(default_factory=CheckSearchData)
+    edit_data: EditData = field(default_factory=EditData)
     bot_message_ids: list = field(default_factory=list)
 
 
@@ -360,6 +378,60 @@ class UserStateStorage:
         """
         state = await self.get_state(user_id)
         return isinstance(state, BlacklistAddState)
+    
+    async def is_editing(self, user_id: int) -> bool:
+        """
+        Проверить, находится ли пользователь в процессе редактирования ЧС.
+        
+        Args:
+            user_id: Telegram ID пользователя
+            
+        Returns:
+            True если пользователь в процессе редактирования
+        """
+        state = await self.get_state(user_id)
+        return isinstance(state, EditState)
+    
+    async def get_edit_data(self, user_id: int) -> EditData:
+        """
+        Получить данные редактора записей ЧС.
+        
+        Args:
+            user_id: Telegram ID пользователя
+            
+        Returns:
+            Данные редактора (новый объект если нет)
+        """
+        async with self._lock:
+            if user_id not in self._states:
+                self._states[user_id] = UserState()
+            return self._states[user_id].edit_data
+    
+    async def set_edit_data(self, user_id: int, edit_data: EditData) -> None:
+        """
+        Установить данные редактора.
+        
+        Args:
+            user_id: Telegram ID пользователя
+            edit_data: Данные редактора
+        """
+        async with self._lock:
+            if user_id not in self._states:
+                self._states[user_id] = UserState()
+            self._states[user_id].edit_data = edit_data
+            logger.debug(f"Данные редактора пользователя {user_id} установлены")
+    
+    async def reset_edit_data(self, user_id: int) -> None:
+        """
+        Сбросить данные редактора, сохранив состояние.
+        
+        Args:
+            user_id: Telegram ID пользователя
+        """
+        async with self._lock:
+            if user_id in self._states:
+                self._states[user_id].edit_data = EditData()
+                logger.debug(f"Данные редактора пользователя {user_id} сброшены")
 
 
 # Глобальный экземпляр хранилища

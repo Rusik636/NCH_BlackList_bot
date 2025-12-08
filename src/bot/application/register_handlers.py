@@ -19,6 +19,8 @@ from src.bot.application.handlers import (
     blacklist_callback_handler,
     cancel_collection_handler,
     edit_blacklist_handler,
+    edit_message_handler,
+    edit_callback_handler,
     check_user_handler,
     check_message_handler,
     check_callback_handler,
@@ -35,6 +37,13 @@ from src.bot.application.handlers.check.keyboards import (
     CALLBACK_CHECK_CONFIRM,
     CALLBACK_CHECK_EDIT,
     CALLBACK_CHECK_CANCEL,
+)
+from src.bot.application.handlers.blacklist.edit_keyboards import (
+    CALLBACK_EDIT_RECORD_PREFIX,
+    CALLBACK_TOGGLE_STATUS,
+    CALLBACK_EDIT_BACK,
+    CALLBACK_EDIT_FINISH,
+    CALLBACK_EDIT_CANCEL,
 )
 
 logger = logging.getLogger(__name__)
@@ -96,7 +105,7 @@ def register_handlers(bot: AsyncTeleBot, context: BotContext) -> None:
         pass_bot=True
     )(require_role(Role.MANAGER, access_service)(check_user_handler))
     
-    # Кнопка "Отменить проверку"
+    # Кнопка "Отменить проверку" или "Отменить редактирование"
     @bot.message_handler(
         func=lambda m: m.text == BTN_CANCEL_CHECK,
         pass_bot=True
@@ -105,6 +114,8 @@ def register_handlers(bot: AsyncTeleBot, context: BotContext) -> None:
         user_id = message.from_user.id
         if await user_state_storage.is_checking(user_id):
             await check_message_handler(message, bot, context)
+        elif await user_state_storage.is_editing(user_id):
+            await edit_message_handler(message, bot, context)
     
     # =====================================================
     # Callback-обработчики
@@ -131,6 +142,21 @@ def register_handlers(bot: AsyncTeleBot, context: BotContext) -> None:
     async def _check_callback_wrapper(call):
         await check_callback_handler(call, bot, context)
     
+    # Callback для редактирования ЧС
+    @bot.callback_query_handler(
+        func=lambda call: (
+            call.data.startswith(CALLBACK_EDIT_RECORD_PREFIX)
+            or call.data in [
+                CALLBACK_TOGGLE_STATUS,
+                CALLBACK_EDIT_BACK,
+                CALLBACK_EDIT_FINISH,
+                CALLBACK_EDIT_CANCEL,
+            ]
+        )
+    )
+    async def _edit_callback_wrapper(call):
+        await edit_callback_handler(call, bot, context)
+    
     # =====================================================
     # Общий обработчик сообщений (должен быть последним!)
     # =====================================================
@@ -148,5 +174,8 @@ def register_handlers(bot: AsyncTeleBot, context: BotContext) -> None:
         elif await user_state_storage.is_checking(user_id):
             # Пользователь в процессе проверки
             await check_message_handler(message, bot, context)
+        elif await user_state_storage.is_editing(user_id):
+            # Пользователь в процессе редактирования ЧС
+            await edit_message_handler(message, bot, context)
     
     logger.info("Обработчики бота зарегистрированы")
