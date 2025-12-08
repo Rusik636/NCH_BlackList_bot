@@ -95,6 +95,93 @@ class BlacklistService:
         self._history_repo = history_repo
         self._hash_service = hash_service
     
+    async def find_existing_person_across_orgs(
+        self,
+        personal_data: PersonalData,
+    ) -> Optional[BlacklistPerson]:
+        """
+        Поиск существующего пользователя по всем организациям.
+        
+        Алгоритм:
+        1. Ищем по паспорту — если НЕ найден → новый человек
+        2. Паспорт найден → проверяем код подразделения
+           - Совпал → это тот же человек
+           - НЕ совпал → проверяем дату рождения
+             - Совпала → это тот же человек
+             - НЕ совпала → новый человек
+        
+        Args:
+            personal_data: Персональные данные для поиска
+            
+        Returns:
+            BlacklistPerson если найден, иначе None
+        """
+        try:
+            # Получаем все организации
+            all_orgs = await self._org_repo.get_all()
+            
+            if not all_orgs:
+                logger.debug("Нет организаций для поиска")
+                return None
+            
+            # Для каждой организации ищем по паспорту
+            for org in all_orgs:
+                # Вычисляем хеш паспорта с солью этой организации
+                passport_hash = self._hash_service.compute_search_hash(
+                    "passport", personal_data.passport, org.hash_salt
+                )
+                
+                # Шаг 1: Ищем по паспорту
+                person = await self._person_repo.find_by_passport_hash(
+                    organization_id=org.id,
+                    passport_hash=passport_hash,
+                )
+                
+                if not person:
+                    # Паспорт не найден в этой организации — продолжаем поиск в других
+                    continue
+                
+                # Паспорт найден! Теперь проверяем код подразделения
+                dept_hash = self._hash_service.compute_search_hash(
+                    "department_code", personal_data.department_code, org.hash_salt
+                )
+                
+                if person.department_code_hash == dept_hash:
+                    # Код подразделения совпал — это тот же человек
+                    logger.info(
+                        f"Найден пользователь {person.id} в org={org.id} "
+                        f"(паспорт + код подразделения)"
+                    )
+                    return person
+                
+                # Код подразделения не совпал — проверяем дату рождения
+                birthdate_hash = self._hash_service.compute_search_hash(
+                    "birthdate", personal_data.birthdate, org.hash_salt
+                )
+                
+                if person.birthdate_hash == birthdate_hash:
+                    # Дата рождения совпала — это тот же человек
+                    logger.info(
+                        f"Найден пользователь {person.id} в org={org.id} "
+                        f"(паспорт + дата рождения)"
+                    )
+                    return person
+                
+                # Ни код подразделения, ни дата рождения не совпали
+                # Паспорт совпал, но это может быть ошибка ввода — продолжаем поиск
+                logger.debug(
+                    f"Паспорт совпал в org={org.id}, но код подразделения и "
+                    f"дата рождения не совпали — продолжаем поиск"
+                )
+            
+            # Не найдено ни в одной организации
+            logger.debug("Пользователь не найден ни в одной организации")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Ошибка при кросс-поиске пользователя: {e}", exc_info=True)
+            return None
+    
     async def add_to_blacklist(
         self,
         organization_id: int,
@@ -128,21 +215,44 @@ class BlacklistService:
                     error=f"Организация с ID {organization_id} не найдена"
                 )
             
-            # Генерируем хеши
-            hashes = self._hash_service.generate_hashes(
-                personal_data,
-                organization.hash_salt
+            # Сначала ищем существующего пользователя по всем организациям
+            # Алгоритм: паспорт обязателен + (код подразделения ИЛИ дата рождения)
+            existing_person = await self.find_existing_person_across_orgs(
+                personal_data=personal_data,
             )
             
-            # Ищем или создаем обезличенного пользователя
-            person, person_created = await self._person_repo.get_or_create(
-                organization_id,
-                hashes
-            )
+            person: Optional[BlacklistPerson] = None
+            person_created = False
+            already_exists = False
             
-            # Проверяем, есть ли уже активная запись
-            existing_active = await self._record_repo.get_active_by_person(person.id)
-            already_exists = existing_active is not None
+            if existing_person:
+                # Найден существующий пользователь в другой организации
+                person = existing_person
+                logger.info(
+                    f"Найден существующий пользователь {person.id} "
+                    f"из организации {person.organization_id}"
+                )
+                
+                # Проверяем, есть ли уже активная запись для этого person
+                existing_active = await self._record_repo.get_active_by_person(person.id)
+                already_exists = existing_active is not None
+            else:
+                # Пользователь не найден — создаём нового для текущей организации
+                hashes = self._hash_service.generate_hashes(
+                    personal_data,
+                    organization.hash_salt
+                )
+                
+                # Проверяем, есть ли в текущей организации
+                person, person_created = await self._person_repo.get_or_create(
+                    organization_id,
+                    hashes
+                )
+                
+                if not person_created:
+                    # Пользователь уже был в текущей организации
+                    existing_active = await self._record_repo.get_active_by_person(person.id)
+                    already_exists = existing_active is not None
             
             # Создаем запись в ЧС
             record = await self._record_repo.create(
@@ -164,7 +274,7 @@ class BlacklistService:
             logger.info(
                 f"Добавлена запись в ЧС: org={organization_id}, "
                 f"person={person.id}, record={record.id}, "
-                f"already_existed={already_exists}"
+                f"person_created={person_created}, already_existed={already_exists}"
             )
             
             return BlacklistAddResult(

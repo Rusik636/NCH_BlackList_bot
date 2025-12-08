@@ -340,4 +340,58 @@ class BlacklistPersonRepository:
         except Exception as e:
             logger.error(f"Ошибка при удалении пользователя {person_id}: {e}", exc_info=True)
             raise
+    
+    async def find_by_hashes_with_match_count(
+        self,
+        passport_hash: str,
+        department_code_hash: str,
+        birthdate_hash: str,
+        organization_id: int,
+    ) -> Optional[tuple[BlacklistPerson, int]]:
+        """
+        Найти пользователя по хешам с подсчётом количества совпадений.
+        Поиск в рамках одной организации.
+        
+        Args:
+            passport_hash: Хеш паспорта
+            department_code_hash: Хеш кода подразделения
+            birthdate_hash: Хеш даты рождения
+            organization_id: ID организации
+            
+        Returns:
+            Tuple (BlacklistPerson, match_count) или None
+            match_count: количество совпавших полей (1-3)
+        """
+        try:
+            query = """
+                SELECT *,
+                    (CASE WHEN passport_hash = $1 THEN 1 ELSE 0 END +
+                     CASE WHEN department_code_hash = $2 THEN 1 ELSE 0 END +
+                     CASE WHEN birthdate_hash = $3 THEN 1 ELSE 0 END) as match_count
+                FROM blacklist_persons
+                WHERE organization_id = $4
+                  AND (passport_hash = $1 
+                       OR department_code_hash = $2 
+                       OR birthdate_hash = $3)
+                ORDER BY match_count DESC
+                LIMIT 1
+            """
+            
+            row = await self._db.fetchrow(
+                query,
+                passport_hash,
+                department_code_hash,
+                birthdate_hash,
+                organization_id,
+            )
+            
+            if row:
+                match_count = row["match_count"]
+                person = BlacklistPerson.from_db_row(row)
+                return person, match_count
+            return None
+            
+        except Exception as e:
+            logger.error(f"Ошибка при поиске по хешам: {e}", exc_info=True)
+            raise
 
