@@ -198,14 +198,6 @@ class Validators:
                 f"Введено: {len(digits)} цифр"
             )
         
-        # Проверяем, что серия не начинается с 0
-        series = digits[:4]
-        if series[0] == '0':
-            return ValidationResult(
-                False, 
-                "Серия паспорта не может начинаться с 0"
-            )
-        
         return ValidationResult(True, normalized=digits)
     
     # =========================================================================
