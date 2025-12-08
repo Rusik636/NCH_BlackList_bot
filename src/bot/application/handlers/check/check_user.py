@@ -110,7 +110,7 @@ def _format_search_results(
     ]
     
     for i, record in enumerate(results, 1):
-        lines.append(f"━━━ Запись #{i} ━━━")
+        lines.append(f"━━━━━━━━━ Запись #{i} ━━━━━━━━━")
 
         status = record.get('status', 'unknown')
         status_emoji = "🟢" if status == "active" else "🔴"
