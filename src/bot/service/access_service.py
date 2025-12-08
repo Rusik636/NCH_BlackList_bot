@@ -73,4 +73,23 @@ class AccessService:
         except Exception as e:
             logger.error(f"Ошибка при проверке доступа для пользователя {admin_id}: {e}", exc_info=True)
             raise AccessDeniedError("Ошибка при проверке прав доступа")
+    
+    async def get_user_role(self, admin_id: int) -> Optional[Role]:
+        """
+        Получить роль пользователя.
+        
+        Args:
+            admin_id: Telegram ID пользователя
+            
+        Returns:
+            Роль пользователя или None, если пользователь не найден
+        """
+        try:
+            admin = await self.admin_repository.get_by_admin_id(admin_id)
+            if admin:
+                return admin.role
+            return None
+        except Exception as e:
+            logger.error(f"Ошибка при получении роли пользователя {admin_id}: {e}", exc_info=True)
+            return None
 

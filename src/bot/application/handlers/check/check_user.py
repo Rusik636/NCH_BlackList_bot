@@ -25,7 +25,8 @@ logger = logging.getLogger(__name__)
 
 
 # Сообщение с просьбой ввести данные
-INPUT_MESSAGE = """🔍 <b>Проверка в черном списке</b>
+INPUT_MESSAGE = """
+🔍 <b>Проверка в черном списке</b>
 
 Введите данные для поиска (каждый параметр с новой строки):
 
@@ -41,7 +42,8 @@ INPUT_MESSAGE = """🔍 <b>Проверка в черном списке</b>
 <b>Пример:</b>
 <code>Иванов Иван Иванович
 1234 567890
-01.01.1990</code>"""
+01.01.1990</code>
+"""
 
 
 async def _delete_message_safe(
@@ -110,7 +112,10 @@ def _format_search_results(
     ]
     
     for i, record in enumerate(results, 1):
-        lines.append(f"━━━━━━━━━ Запись #{i} ━━━━━━━━━")
+        # Получаем последние 6 символов ID записи
+        record_id = record.get('record_id', '')
+        record_id_short = record_id[-6:] if record_id else 'N/A'
+        lines.append(f"━━━━━ Запись #{i} (ID: <code>{record_id_short}</code>) ━━━━━")
 
         status = record.get('status', 'unknown')
         status_emoji = "🟢" if status == "active" else "🔴"

@@ -8,7 +8,7 @@ from telebot.async_telebot import AsyncTeleBot
 from src.bot.application.context import BotContext
 from src.bot.application.decorators import require_role
 from src.bot.domain.role import Role
-from src.bot.application.keyboard import BTN_ADD_TO_BLACKLIST, BTN_CHECK_USER
+from src.bot.application.keyboard import BTN_ADD_TO_BLACKLIST, BTN_CHECK_USER, BTN_EDIT_BLACKLIST
 from src.bot.application.storage import user_state_storage
 from src.bot.application.states import CheckState
 from src.bot.application.handlers import (
@@ -18,6 +18,7 @@ from src.bot.application.handlers import (
     blacklist_message_handler,
     blacklist_callback_handler,
     cancel_collection_handler,
+    edit_blacklist_handler,
     check_user_handler,
     check_message_handler,
     check_callback_handler,
@@ -78,6 +79,12 @@ def register_handlers(bot: AsyncTeleBot, context: BotContext) -> None:
         func=lambda m: m.text == BTN_CANCEL_PROCESS,
         pass_bot=True
     )(cancel_collection_handler)
+    
+    # Кнопка "Редактировать ЧС" — редактирование записей черного списка
+    bot.message_handler(
+        func=lambda m: m.text == BTN_EDIT_BLACKLIST,
+        pass_bot=True
+    )(require_role(Role.ADMIN, access_service)(edit_blacklist_handler))
     
     # =====================================================
     # Обработчики проверки (доступны менеджерам и выше)
